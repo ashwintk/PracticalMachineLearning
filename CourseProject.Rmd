@@ -1,0 +1,128 @@
+---
+# Machine Learning Course Project
+## Author: Ashwin Kumar
+
+###1. Load all the required libraries
+```{r, "Load Libraries", message=FALSE, warning=FALSE}
+library(caret)
+library(reshape2)
+library(ggplot2)
+library(rattle)
+library(rpart)
+set.seed(123456789)
+```
+###2. Fetch the given dataset
+```{r, "fetch_data", cache=TRUE, message=FALSE, warning=FALSE}
+downloadData <- function(URL, fileName){
+  #Download the required file
+  download.file(url = URL,destfile = fileName,method = "curl")
+  #Mark the fields that are NA's properly
+  process_na <- read.csv(fileName,na.strings=c("NA","#Div/0!",""))
+  process_na
+}
+total_train <- downloadData(URL="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",fileName="train.csv")
+total_test <- downloadData(URL="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",fileName="test.csv")
+```
+###3. Preprocess the fetched dataset
+For my analysis, I will be partitioning my training set into two (train and test set). I will retain the test dataset to identify a machine learning algorithm that performs the best
+```{r, "pre_process",cache=TRUE, message=FALSE, warning=FALSE}
+inTrain <- createDataPartition(y = total_train$classe, p = 0.7,list=FALSE)
+myTrain <- total_train[inTrain,]
+myTest <- total_train[-inTrain,]
+dim(myTrain)
+```
+In the next step in pre-processing the dataset, I will have to identify the fields that show no variablility. I have done this using nearZeroVar function
+```{r, "no_variability",cache=TRUE, message=FALSE, warning=FALSE}
+nearZeroMetrics <- nearZeroVar(myTrain,saveMetrics = TRUE)
+nearZeroMetrics
+```
+Get all the near zero variables and remove them from all the datasets
+```{r,"remove_nzv",cache=TRUE, message=FALSE, warning=FALSE}
+allnzvInData <-names(myTrain) %in% row.names(nearZeroMetrics)[nearZeroMetrics$nzv]
+myTrain <- myTrain[,!allnzvInData]
+myTest <- myTest[,!allnzvInData]
+total_test <- total_test[,!allnzvInData]
+dim(myTrain)
+```
+After removing all the fields that have a near zero variabnce, remove the user id's so that the don't affect the outcome of the machine learning algorithms
+```{r, "remove_id_var",cache=TRUE, message=FALSE, warning=FALSE}
+myTrain <- myTrain[,-1]
+myTest <- myTest[,-1]
+total_test <- total_test[,-1]
+```
+We can remove the columns that are mostly NA's. In my case I used a threshold of 70% (i.e) I removed the columns whose values are about 70% NA's.
+```{r,"remove_columns",cache=TRUE, message=FALSE, warning=FALSE}
+remove_columns <- function(dataset){
+  newDataset <- dataset
+  for(i in 1:ncol(dataset)){
+    if(sum(is.na(dataset[,i]))/nrow(dataset) >= 0.70){
+      newDataset <- newDataset[,-which(names(newDataset)==names(dataset)[i])]
+    }
+  }
+  newDataset
+}
+myTrain <- remove_columns(dataset = myTrain)
+myTest <- remove_columns(dataset = myTest)
+total_test <- remove_columns(dataset = total_test)
+dim(myTrain)
+```
+###4. Different Machine Learning Models
+The code to fit the given data into a decision tree is as shown below
+```{r, "decision_tree",cache=TRUE, message=FALSE, warning=FALSE}
+#Decision Tree
+model1 <- rpart(classe~.,data=myTrain,method="class")
+#Plot the generated Tree
+fancyRpartPlot(model1)
+#Boosting W/ Trees
+model2 <- train(classe~.,data = myTrain,method = "gbm", verbose=FALSE)
+#Random Forests
+model3 <- randomForest(classe~.,data = myTrain)
+#Naive Bayes Algorithm
+model4 <- train(classe~.,data=myTrain,method="nb")
+```
+###5. Confusion Matrices
+```{r,"confusion_matrices",cache=TRUE, message=FALSE, warning=FALSE}
+#Confusion matrix for Decision Tree
+cf1 <- confusionMatrix(myTest$classe,predict(model1,myTest[,-58],type="class"))
+#Confusion matrix for Boosting W/ Tree
+cf2 <- confusionMatrix(myTest$classe,predict(model2,myTest[,-58]))
+#Confusion matrix for Random Forest
+cf3 <- confusionMatrix(myTest$classe,predict(model3,myTest[,-58]))
+#Confusion matrix for Naive Bayes Classification
+cf4 <- confusionMatrix(myTest$classe,predict(model4,myTest[,-58]))
+```
+###6. Accuracy of various Machine Learning Algorithms
+```{r,"accuracy_analysis",cache=TRUE, message=FALSE, warning=FALSE}
+accuracy_analysis <- data.frame(
+  "models" = c("Decision Tree","Boosting W/ Trees","Random Forest","Naive Bayes"),
+  "accuracy" = c(cf1$overall[1]*100,cf2$overall[1]*100,cf3$overall[1]*100,cf4$overall[1]*100))
+accuracy_analysis
+```
+Based on the accuracies of all the fitted models, random forest has a better accuracy.
+
+
+###7. Generating output files
+```{r,"generate_test_cases",cache=TRUE, message=FALSE, warning=FALSE}
+#I had issues with the column classes between the test and training sets and therefore I used this function for conversion
+ConvertColumnClasses <- function(trainingSet, testingSet){
+  for(i in 1:ncol(testingSet)){
+    class(testingSet[,i]) <- class(trainingSet[,i])
+  }
+}
+#The function call changes the column classes
+ConvertColumnClasses(trainingSet = myTrain[,-58],testingSet = total_test[,-58])
+total_test <- rbind(myTrain[3,-58],total_test[,-58])
+total_test <- total_test[-3,]
+#Code for generation
+pml_write_files = function(path,x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0(path,"/","problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+dir.create("test_cases")
+answers = rep("A", 20)
+predictions <- predict(model3,total_test,type="class")
+pml_write_files(path = "test_cases",x = predictions)
+```

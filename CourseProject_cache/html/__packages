@@ -1,0 +1,13 @@
+base
+lattice
+ggplot2
+caret
+reshape2
+rattle
+rpart
+randomForest
+survival
+gbm
+plyr
+MASS
+klaR
